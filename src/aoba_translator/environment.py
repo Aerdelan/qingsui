@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import importlib.util
 import json
@@ -102,6 +102,7 @@ def inspect_environment() -> EnvironmentReport:
         "cv2",
         "easyocr",
         "huggingface_hub",
+        "manga_ocr",
         "numpy",
         "PIL",
         "sentencepiece",

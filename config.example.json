@@ -21,10 +21,17 @@
     "target_language": "简体中文"
   },
   "ocr": {
-    "provider": "easyocr",
+    "provider": "manga",
     "languages": ["ja", "en"],
     "gpu": "auto",
-    "min_confidence": 0.25
+    "min_confidence": 0.1,
+    "text_threshold": 0.5,
+    "low_text": 0.3,
+    "link_threshold": 0.3,
+    "canvas_size": 2560,
+    "min_region_size": 8,
+    "max_region_area_ratio": 0.12,
+    "crop_padding": 0.15
   },
   "rendering": {
     "font_path": null,

@@ -25,10 +25,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "target_language": "简体中文",
     },
     "ocr": {
-        "provider": "easyocr",
+        "provider": "manga",
         "languages": ["ja", "en"],
         "gpu": "auto",
-        "min_confidence": 0.25,
+        "min_confidence": 0.1,
         "text_threshold": 0.5,
         "low_text": 0.3,
         "link_threshold": 0.3,
@@ -162,25 +162,30 @@ LEGACY_TRANSLATION_MODELS = {
 
 
 def _migrate_config(values: dict[str, Any]) -> bool:
+    changed = False
     translation = values.get("translation")
-    if not isinstance(translation, dict):
-        return False
-    provider = str(translation.get("provider", "")).lower()
-    model_id = str(translation.get("model_id", ""))
-    if provider != "transformers" or model_id not in LEGACY_TRANSLATION_MODELS:
-        return False
-    translation.update(
-        {
-            "provider": "ollama",
-            "ollama_model": "qwen3.5:2b",
-            "ollama_base_url": "http://127.0.0.1:11434",
-            "style_profile": "acgn_colloquial",
-            "temperature": 0.25,
-            "context_chars": 1800,
-            "context_segments": 4,
-        }
-    )
-    return True
+    if isinstance(translation, dict):
+        provider = str(translation.get("provider", "")).lower()
+        model_id = str(translation.get("model_id", ""))
+        if provider == "transformers" and model_id in LEGACY_TRANSLATION_MODELS:
+            translation.update(
+                {
+                    "provider": "ollama",
+                    "ollama_model": "qwen3.5:2b",
+                    "ollama_base_url": "http://127.0.0.1:11434",
+                    "style_profile": "acgn_colloquial",
+                    "temperature": 0.25,
+                    "context_chars": 1800,
+                    "context_segments": 4,
+                }
+            )
+            changed = True
+    # 纯 EasyOCR 识别对漫画装饰字体漏检严重，统一迁移到混合漫画 OCR 引擎。
+    ocr = values.get("ocr")
+    if isinstance(ocr, dict) and str(ocr.get("provider", "")).lower() == "easyocr":
+        ocr["provider"] = "manga"
+        changed = True
+    return changed
 
 
 def load_config(root: Path | None = None) -> AppConfig:

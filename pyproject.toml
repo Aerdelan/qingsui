@@ -16,6 +16,7 @@ dependencies = []
 ml = [
   "easyocr>=1.7.2,<2",
   "huggingface-hub>=0.27,<2",
+  "manga-ocr>=0.1.9,<1",
   "opencv-python-headless>=4.10,<5",
   "Pillow>=10.4,<13",
   "sentencepiece>=0.2,<1",

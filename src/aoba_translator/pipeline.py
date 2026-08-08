@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import shutil
@@ -21,7 +21,7 @@ from .config import AppConfig
 from .manga import translate_manga_images
 from .models import ModelManager
 from .novel import translate_novel
-from .ocr import EasyOcrEngine
+from .ocr import EasyOcrEngine, HybridMangaOcrEngine, OcrEngine
 from .translation import Translator, build_translator
 
 
@@ -37,7 +37,7 @@ class TranslationPipeline:
         self.config = config
         self.model_manager = model_manager
         self._translator: Translator | None = None
-        self._ocr: EasyOcrEngine | None = None
+        self._ocr: OcrEngine | None = None
         self._runtime_lock = Lock()
 
     def reset_runtime(self) -> None:
@@ -53,12 +53,19 @@ class TranslationPipeline:
                 )
             return self._translator
 
-    def _get_ocr(self) -> EasyOcrEngine:
+    def _get_ocr(self) -> OcrEngine:
         with self._runtime_lock:
             if self._ocr is None:
-                self._ocr = EasyOcrEngine(
-                    self.config.section("ocr"), self.model_manager.ocr_dir
-                )
+                ocr_config = self.config.section("ocr")
+                provider = str(ocr_config.get("provider", "manga")).lower()
+                if provider == "manga":
+                    self._ocr = HybridMangaOcrEngine(
+                        ocr_config,
+                        self.model_manager.ocr_dir,
+                        self.model_manager.manga_ocr_dir,
+                    )
+                else:
+                    self._ocr = EasyOcrEngine(ocr_config, self.model_manager.ocr_dir)
             return self._ocr
 
     def run(

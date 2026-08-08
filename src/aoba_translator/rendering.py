@@ -56,13 +56,16 @@ def _estimate_background(crop):
     import numpy as np
 
     if crop.size == 0:
-        return np.array([255, 255, 255], dtype=np.float32)
+        return np.array([255, 255, 255], dtype=np.float32), 0.0
     top = crop[0, :, :]
     bottom = crop[-1, :, :]
     left = crop[:, 0, :]
     right = crop[:, -1, :]
     border = np.concatenate((top, bottom, left, right), axis=0)
-    return np.median(border.astype(np.float32), axis=0)
+    # 边框颜色离散度：低说明是纯色气泡底，可直接平铺填充；
+    # 高说明区域边缘是复杂画稿，只能小心擦除。
+    border_std = float(np.std(border.astype(np.float32)))
+    return np.median(border.astype(np.float32), axis=0), border_std
 
 
 def _text_mask_and_color(image, region: TextRegion, padding: int):
@@ -78,7 +81,7 @@ def _text_mask_and_color(image, region: TextRegion, padding: int):
     crop = image[y0 : y1 + 1, x0 : x1 + 1]
     local_polygon = [(x - x0, y - y0) for x, y in region.polygon]
     polygon_mask = _polygon_mask(crop.shape[1], crop.shape[0], local_polygon)
-    background = _estimate_background(crop)
+    background, border_std = _estimate_background(crop)
     difference = np.linalg.norm(crop.astype(np.float32) - background, axis=2)
     candidates = difference[polygon_mask > 0]
     if candidates.size:
@@ -96,6 +99,14 @@ def _text_mask_and_color(image, region: TextRegion, padding: int):
         else:
             fallback = gray > min(255, int(background_luma + 28))
         glyph_mask = (fallback & (polygon_mask > 0)).astype(np.uint8) * 255
+
+    # 掩码占比封顶：区域里被标成“文字”的像素过多时，说明把画稿主体也算进去了，
+    # 只保留色差最大的那部分像素，避免后续 inpaint 涂抹漫画主体。
+    max_glyph_ratio = 0.55
+    ratio = int((glyph_mask > 0).sum()) / max(1, area)
+    if ratio > max_glyph_ratio and candidates.size:
+        threshold = float(np.percentile(candidates, 100.0 * (1.0 - max_glyph_ratio)))
+        glyph_mask = ((difference >= threshold) & (polygon_mask > 0)).astype(np.uint8) * 255
 
     # 字重估算：粗体笔画更粗，字形填充率明显更高（在形态学膨胀前计算）。
     fill_ratio = int((glyph_mask > 0).sum()) / area
@@ -116,9 +127,16 @@ def _text_mask_and_color(image, region: TextRegion, padding: int):
         background_luma = float(background.mean())
         color = (25, 25, 25) if background_luma > 128 else (245, 245, 245)
     # 对比度保护：文字色与背景色过近时强制使用深/浅色。
-    if math.dist(color, tuple(int(value) for value in background)) < 30:
+    if math.dist(color, tuple(int(value) for value in background)) < 45:
         color = (25, 25, 25) if float(background.mean()) > 128 else (245, 245, 245)
-    return (x0, y0, x1, y1), glyph_mask, color, tuple(int(value) for value in background), weight
+    return (
+        (x0, y0, x1, y1),
+        glyph_mask,
+        color,
+        tuple(int(value) for value in background),
+        weight,
+        border_std,
+    )
 
 
 def erase_original_text(image, regions: Sequence[TextRegion], padding: int, radius: int):
@@ -127,19 +145,42 @@ def erase_original_text(image, regions: Sequence[TextRegion], padding: int, radi
 
     full_mask = np.zeros(image.shape[:2], dtype=np.uint8)
     background_colors: list[tuple[int, int, int]] = []
+    flat_fills: list[tuple[np.ndarray, tuple[int, int, int]]] = []
     for region in regions:
-        bounds, local_mask, color, background, weight = _text_mask_and_color(image, region, padding)
+        (
+            bounds,
+            local_mask,
+            color,
+            background,
+            weight,
+            border_std,
+        ) = _text_mask_and_color(image, region, padding)
         x0, y0, x1, y1 = bounds
-        full_mask[y0 : y1 + 1, x0 : x1 + 1] = np.maximum(
-            full_mask[y0 : y1 + 1, x0 : x1 + 1], local_mask
-        )
+        region_slice = (slice(y0, y1 + 1), slice(x0, x1 + 1))
+        # 边框颜色均匀（气泡/旁白框）时直接用背景色平铺填充，
+        # 比 inpaint 更干净，也不会把周边画稿涂抹进来。
+        if border_std < 20.0:
+            polygon_global = _polygon_mask(
+                image.shape[1],
+                image.shape[0],
+                [(x, y) for x, y in region.polygon],
+            )
+            local_dilated = cv2.dilate(local_mask, np.ones((3, 3), dtype=np.uint8), iterations=padding)
+            local_global = np.zeros(image.shape[:2], dtype=np.uint8)
+            local_global[region_slice] = local_dilated
+            flat_fills.append((np.maximum(polygon_global, local_global), background))
+        else:
+            full_mask[region_slice] = np.maximum(full_mask[region_slice], local_mask)
         region.text_color = color
         region.weight = weight
         region.background_color = background
         background_colors.append(background)
-    if not full_mask.any():
-        return image.copy(), background_colors
-    restored = cv2.inpaint(image, full_mask, float(radius), cv2.INPAINT_TELEA)
+    if full_mask.any():
+        restored = cv2.inpaint(image, full_mask, float(radius), cv2.INPAINT_TELEA)
+    else:
+        restored = image.copy()
+    for fill_mask, background in flat_fills:
+        restored[fill_mask > 0] = np.asarray(background, dtype=restored.dtype)
     return restored, background_colors
 
 
