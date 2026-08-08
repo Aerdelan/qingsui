@@ -257,6 +257,16 @@ $env:PYTHONPATH = ".\src"
 python -m unittest discover -s tests -v
 ```
 
+## 开源协议
+
+本项目采用 [GPL-3.0](https://www.gnu.org/licenses/gpl-3.0.html)（GNU 通用公共许可证第三版）开源。
+
+- 你可以自由使用、修改和分发本项目。
+- 任何基于本项目的衍生作品必须以相同协议（GPL-3.0）开源。
+- 分发二进制时须同时提供或指明对应源代码的获取方式。
+
+详见仓库根目录 [LICENSE](./LICENSE) 文件。
+
 
 
 
