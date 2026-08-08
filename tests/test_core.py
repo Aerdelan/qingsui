@@ -1,0 +1,227 @@
+﻿from __future__ import annotations
+
+import json
+import sys
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from aoba_translator.assistant import AssistantError, PROJECT_SYSTEM_PROMPT, ProjectAssistant, _clip
+from aoba_translator.archive import (
+    ArchiveError,
+    classify_files,
+    collect_content_files,
+    extract_archive,
+)
+from aoba_translator.config import load_config
+from aoba_translator.manga import merge_regions
+from aoba_translator.messages import START_COMMAND, missing_dependencies_message
+from aoba_translator.models import ModelManager
+from aoba_translator.novel import build_translation_units, decode_text, restore_document, translate_novel
+from aoba_translator.pipeline import TranslationPipeline
+from aoba_translator.server import build_access_urls, sanitize_filename
+from aoba_translator.translation import OllamaTranslator, clean_translation
+from aoba_translator.domain import TextRegion
+
+
+class ConfigTests(unittest.TestCase):
+    def test_first_run_creates_local_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = load_config(root)
+            self.assertTrue(config.first_run)
+            self.assertTrue(config.config_path.exists())
+            loaded = json.loads(config.config_path.read_text(encoding="utf-8"))
+            self.assertEqual(loaded["app"]["port"], 8765)
+            self.assertEqual(loaded["app"]["host"], "0.0.0.0")
+
+
+class ConfigMigrationTests(unittest.TestCase):
+    def test_legacy_marian_config_migrates_to_oral_ollama_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            local = root / ".local"
+            local.mkdir()
+            (local / "config.json").write_text(
+                json.dumps(
+                    {
+                        "translation": {
+                            "provider": "transformers",
+                            "model_id": "shun89/opus-mt-ja-zh",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = load_config(root)
+            self.assertFalse(config.first_run)
+            self.assertEqual(config.section("translation")["provider"], "ollama")
+            self.assertEqual(config.section("translation")["style_profile"], "acgn_colloquial")
+            self.assertEqual(config.section("translation")["ollama_model"], "qwen3.5:2b")
+
+
+class ArchiveTests(unittest.TestCase):
+    def test_zip_path_traversal_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive_path = root / "bad.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("../outside.txt", "blocked")
+            with self.assertRaises(ArchiveError):
+                extract_archive(archive_path, root / "output")
+
+    def test_classifies_manga_and_novel(self) -> None:
+        self.assertEqual(classify_files([Path("001.jpg"), Path("002.png")]), "manga")
+        self.assertEqual(classify_files([Path("story.txt")]), "novel")
+
+
+    def test_content_files_use_natural_page_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("10.jpg", "2.jpg", "1.jpg"):
+                (root / name).write_bytes(b"page")
+            self.assertEqual(
+                [path.name for path in collect_content_files(root)],
+                ["1.jpg", "2.jpg", "10.jpg"],
+            )
+
+
+class NovelTests(unittest.TestCase):
+    def test_cp932_decode(self) -> None:
+        text, encoding = decode_text("物語です。".encode("cp932"))
+        self.assertEqual(text, "物語です。")
+        self.assertEqual(encoding, "cp932")
+
+    def test_layout_preserves_blank_lines(self) -> None:
+        source = "第一話。\r\n\r\n第二話！\r\n"
+        units, layout = build_translation_units(source, max_chars=20)
+        translated = [f"译:{item}" for item in units]
+        restored = restore_document(translated, layout)
+        self.assertEqual(restored, "译:第一話。\r\n\r\n译:第二話！\r\n")
+
+    def test_translation_passes_previous_segments_as_context(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "novel.txt"
+            destination = root / "novel_zh.txt"
+            source.write_bytes("第一話。\n第二話。\n第三話。\n".encode("utf-8"))
+            translator = ContextTranslator()
+            translate_novel(
+                source,
+                destination,
+                translator,
+                batch_size=1,
+                context_segments=2,
+            )
+            self.assertEqual(translator.contexts[0], "")
+            self.assertIn("中:第一話。", translator.contexts[1])
+            self.assertIn("中:第二話。", translator.contexts[2])
+
+
+class TranslationPromptTests(unittest.TestCase):
+    def test_ollama_prompt_requests_colloquial_dialogue(self) -> None:
+        translator = OllamaTranslator("murasaki")
+        prompt = translator._system_prompt()
+        self.assertIn("口语化", prompt)
+        self.assertIn("不要机械直译", prompt)
+
+    def test_clean_translation_removes_thinking_block(self) -> None:
+        self.assertEqual(clean_translation("<think>分析</think>你好"), "你好")
+
+
+class AssistantTests(unittest.TestCase):
+    def test_prompt_contains_project_and_startup_knowledge(self) -> None:
+        self.assertIn("rendering.py", PROJECT_SYSTEM_PROMPT)
+        self.assertIn("powershell -ExecutionPolicy Bypass -File .\\start.ps1", PROJECT_SYSTEM_PROMPT)
+        self.assertIn("不能执行 shell", PROJECT_SYSTEM_PROMPT)
+
+    def test_context_values_are_clipped(self) -> None:
+        clipped = _clip("青" * 20, 8)
+        self.assertTrue(clipped.startswith("青" * 8))
+        self.assertIn("已截断", clipped)
+
+    def test_empty_question_is_rejected_before_model_call(self) -> None:
+        assistant = ProjectAssistant.__new__(ProjectAssistant)
+        with self.assertRaises(AssistantError):
+            assistant.chat("   ")
+
+class ContextTranslator:
+    name = "context-test"
+
+    def __init__(self) -> None:
+        self.contexts: list[str] = []
+
+    def translate_batch(self, texts, *, context: str = "") -> list[str]:
+        self.contexts.append(context)
+        return [f"中:{text}" for text in texts]
+
+
+class MangaTests(unittest.TestCase):
+    def test_adjacent_horizontal_lines_are_merged(self) -> None:
+        regions = [
+            TextRegion([(0, 0), (100, 0), (100, 20), (0, 20)], "今日は", 0.9),
+            TextRegion([(5, 23), (95, 23), (95, 43), (5, 43)], "晴れ", 0.8),
+        ]
+        merged = merge_regions(regions)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].text, "今日は晴れ")
+
+
+class PipelineTests(unittest.TestCase):
+    def test_novel_pipeline_creates_final_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = load_config(root)
+            config.values["translation"]["provider"] = "echo"
+            source = root / "cache_token_novel.txt"
+            source.write_bytes("これは物語です。\n".encode("utf-8"))
+            models = ModelManager(config)
+            pipeline = TranslationPipeline(config, models)
+            output, detected, details = pipeline.run(
+                source, "test-job", display_name="novel.txt"
+            )
+            self.assertEqual(detected, "novel")
+            self.assertEqual(details["count"], 1)
+            self.assertTrue(output.exists())
+            with zipfile.ZipFile(output) as archive:
+                self.assertIn("novel_zh.txt", archive.namelist())
+                translated = archive.read("novel_zh.txt").decode("utf-8-sig")
+                self.assertEqual(translated, "これは物語です。\n")
+                self.assertIn("translation-report.json", archive.namelist())
+
+
+class MessageTests(unittest.TestCase):
+    def test_dependency_message_contains_copyable_command(self) -> None:
+        message = missing_dependencies_message(["transformers", "cv2", "easyocr", "torch"])
+        self.assertEqual(
+            message,
+            f"缺少运行依赖：cv2, easyocr, torch, transformers。请在项目目录执行：{START_COMMAND}",
+        )
+
+
+class ServerTests(unittest.TestCase):
+    def test_filename_is_sanitized(self) -> None:
+        self.assertEqual(sanitize_filename("..%2Fbook%3F.txt"), "book_.txt")
+
+    def test_wildcard_host_builds_loopback_and_lan_urls(self) -> None:
+        self.assertEqual(
+            build_access_urls("0.0.0.0", 8765, ["192.168.1.20"]),
+            ["http://127.0.0.1:8765", "http://192.168.1.20:8765"],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+
+
+
+
+
+
+
+

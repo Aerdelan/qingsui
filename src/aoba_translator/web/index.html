@@ -1,0 +1,189 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#dff2d8">
+  <title>青穗翻译台 · Aoba Translator</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="青穗翻译台首页">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40" role="img">
+            <path d="M21 34c-1-8 0-15 7-24M20 24c-7-1-11-5-12-11 7-1 12 3 12 11Zm3 2c7-1 11-5 12-11-7-1-12 3-12 11Z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span><strong>青穗翻译台</strong><small>Aoba Translator</small></span>
+      </a>
+      <div class="local-pill"><span></span> 本地运行 · 数据不出设备</div>
+    </header>
+
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">LOCAL-FIRST · 日本語 → 简体中文</p>
+        <h1>让故事跨过语言，<br><em>保留原本的呼吸。</em></h1>
+        <p class="hero-text">上传日文小说或漫画压缩包，自动完成类型判断、文字识别、翻译、背景修复与排版回嵌。</p>
+        <div class="feature-row">
+          <span>安全解压</span><span>离线模型</span><span>原样排版</span><span>一键打包</span>
+        </div>
+      </div>
+      <div class="hero-visual" aria-hidden="true">
+        <div class="paper paper-back"></div>
+        <div class="paper paper-front">
+          <div class="paper-head"><i></i><i></i><i></i></div>
+          <div class="manga-panel">
+            <div class="bubble bubble-one">物語は<br>ここから</div>
+            <div class="bubble bubble-two">故事<br>从这里开始</div>
+            <div class="mountain"></div>
+          </div>
+          <div class="paper-lines"><i></i><i></i><i></i></div>
+        </div>
+        <div class="spark spark-one">译</div>
+        <div class="spark spark-two">あ</div>
+      </div>
+    </section>
+
+    <section id="setupPanel" class="setup-panel hidden" aria-live="polite">
+      <div class="setup-icon">初</div>
+      <div class="setup-copy">
+        <strong>首次运行，需要准备本地模型</strong>
+        <p id="setupMessage">系统会下载日文 OCR 与日中翻译模型。模型只需下载一次。</p>
+      </div>
+      <button id="setupButton" class="button button-warm">开始初始化</button>
+    </section>
+
+    <section class="workspace-grid">
+      <article class="card upload-card">
+        <div class="card-heading">
+          <div>
+            <p class="step-label">STEP 01</p>
+            <h2>投递原稿</h2>
+          </div>
+          <span class="format-badge">TXT · ZIP · CBZ · 7Z · RAR</span>
+        </div>
+
+        <input id="fileInput" type="file" hidden accept=".txt,.md,.zip,.cbz,.7z,.rar,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff">
+        <button id="dropZone" class="drop-zone" type="button">
+          <span class="upload-symbol" aria-hidden="true">
+            <svg viewBox="0 0 48 48"><path d="M24 31V10m0 0-8 8m8-8 8 8M10 29v6a5 5 0 0 0 5 5h18a5 5 0 0 0 5-5v-6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <strong>将文件拖到这里</strong>
+          <span>或者点击选择本地文件</span>
+          <small>漫画请尽量按阅读顺序命名图片；单文件上限 <b id="uploadLimit">1024 MB</b></small>
+        </button>
+
+        <div class="pipeline-strip" aria-label="处理流程">
+          <div><b>1</b><span>识别类型</span></div><i></i>
+          <div><b>2</b><span>OCR / 分段</span></div><i></i>
+          <div><b>3</b><span>本地翻译</span></div><i></i>
+          <div><b>4</b><span>修复回嵌</span></div><i></i>
+          <div><b>5</b><span>打包产物</span></div>
+        </div>
+      </article>
+
+      <aside class="card status-card">
+        <div class="card-heading compact">
+          <div>
+            <p class="step-label">RUNTIME</p>
+            <h2>运行状态</h2>
+          </div>
+          <button id="refreshButton" class="icon-button" title="刷新状态" aria-label="刷新状态">↻</button>
+        </div>
+        <div class="health-ring" id="healthRing">
+          <div><strong id="healthValue">--</strong><span>READY</span></div>
+        </div>
+        <dl class="status-list">
+          <div><dt>翻译模型</dt><dd id="translationStatus">检测中</dd></div>
+          <div><dt>日文 OCR</dt><dd id="ocrStatus">检测中</dd></div>
+          <div><dt>计算设备</dt><dd id="deviceStatus">检测中</dd></div>
+          <div><dt>局域网访问</dt><dd id="accessStatus" title="">检测中</dd></div>
+          <div><dt>产物目录</dt><dd id="outputStatus" title="">data/output</dd></div>
+        </dl>
+        <p id="runtimeHint" class="runtime-hint">正在读取本机环境…</p>
+      </aside>
+    </section>
+
+    <section class="jobs-section">
+      <div class="section-heading">
+        <div><p class="step-label">STEP 02</p><h2>处理队列</h2></div>
+        <span id="jobCounter">0 个任务</span>
+      </div>
+      <div id="emptyJobs" class="empty-state">
+        <span>青</span>
+        <strong>队列还是空的</strong>
+        <p>投递一份小说或漫画，翻译进度会显示在这里。</p>
+      </div>
+      <div id="jobList" class="job-list"></div>
+    </section>
+
+    <footer>
+      <span>青穗翻译台 v0.1 · 本地优先</span>
+      <span>背景修复会尽量只覆盖文字像素，复杂纹理建议抽查。</span>
+    </footer>
+  </main>
+
+  <div class="assistant-dock">
+    <section id="assistantPanel" class="assistant-panel" aria-hidden="true" aria-label="青芽项目诊断助手">
+      <header class="assistant-header">
+        <div class="assistant-identity">
+          <span class="assistant-avatar-mini" aria-hidden="true">芽</span>
+          <span><strong>青芽 · 项目诊断助手</strong><small id="assistantModel">正在读取本地模型…</small></span>
+        </div>
+        <div class="assistant-header-actions">
+          <button id="assistantClear" type="button" title="清空对话" aria-label="清空对话">清</button>
+          <button id="assistantClose" type="button" title="关闭助手" aria-label="关闭助手">×</button>
+        </div>
+      </header>
+      <div id="assistantMessages" class="assistant-messages" aria-live="polite"></div>
+      <div class="assistant-suggestions" aria-label="快捷问题">
+        <button type="button" data-assistant-prompt="检查当前环境、模型和最近任务，告诉我现在最需要处理的问题。">检查运行环境</button>
+        <button type="button" data-assistant-prompt="翻译结果很生硬或意思不对时，我应该检查哪些模型与配置？">翻译质量诊断</button>
+      </div>
+      <div class="assistant-composer">
+        <textarea id="assistantInput" rows="4" maxlength="12000" placeholder="粘贴网页报错、PowerShell 输出，或描述你遇到的问题…"></textarea>
+        <div class="assistant-composer-actions">
+          <button id="assistantPaste" class="assistant-paste" type="button">粘贴并分析</button>
+          <span>Ctrl + Enter 发送</span>
+          <button id="assistantSend" class="assistant-send" type="button">发送</button>
+        </div>
+      </div>
+    </section>
+
+    <button id="assistantToggle" class="assistant-doll-button" type="button" aria-label="打开青芽项目诊断助手" aria-expanded="false">
+      <span class="assistant-callout">报错了？问问青芽</span>
+      <svg class="assistant-doll" viewBox="0 0 120 142" role="img" aria-label="青芽 2D 助手玩偶">
+        <defs>
+          <linearGradient id="dollCoat" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff8df"/><stop offset="1" stop-color="#f3d996"/></linearGradient>
+          <linearGradient id="dollHair" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#5f8967"/><stop offset="1" stop-color="#315c45"/></linearGradient>
+        </defs>
+        <ellipse cx="61" cy="134" rx="38" ry="6" fill="#6c8f70" opacity=".16"/>
+        <path d="M59 22C51 9 57 2 68 2c2 10-1 17-9 20Z" fill="#8fbd74"/>
+        <path d="M61 21C70 9 80 10 84 18c-7 6-14 7-23 3Z" fill="#6fa763"/>
+        <path d="M32 57C29 31 42 17 61 17s34 14 31 40c-3 24-13 37-31 37S35 81 32 57Z" fill="url(#dollHair)"/>
+        <path d="M38 54c0-18 10-28 23-28s24 10 24 28v9c0 17-10 28-24 28S38 80 38 63Z" fill="#ffe9d2"/>
+        <path d="M37 55c1-21 11-31 26-30 13 1 23 12 22 29-10-2-17-8-21-17-5 9-14 15-27 18Z" fill="url(#dollHair)"/>
+        <path d="M38 51c-8 3-9 16-4 22m51-22c8 3 9 16 4 22" fill="none" stroke="#315c45" stroke-width="6" stroke-linecap="round"/>
+        <ellipse cx="50" cy="62" rx="3.4" ry="4.7" fill="#34483a"/><ellipse cx="73" cy="62" rx="3.4" ry="4.7" fill="#34483a"/>
+        <path d="M56 75c3 3 7 3 10 0" fill="none" stroke="#bd7768" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="43" cy="71" r="4" fill="#f2aaa0" opacity=".35"/><circle cx="80" cy="71" r="4" fill="#f2aaa0" opacity=".35"/>
+        <path d="M29 126c2-27 15-39 32-39s31 12 34 39c-15 9-50 9-66 0Z" fill="url(#dollCoat)" stroke="#dfbd70" stroke-width="2"/>
+        <path d="M61 91v38M45 94c2 10 8 16 16 17 8-1 14-7 16-17" fill="none" stroke="#8ab079" stroke-width="3"/>
+        <path d="M34 105c-12 5-15 15-11 21 5 5 13 1 18-7m46-14c12 5 15 15 11 21-5 5-13 1-18-7" fill="none" stroke="#f0d58f" stroke-width="10" stroke-linecap="round"/>
+        <path d="M86 89h21a7 7 0 0 1 7 7v12a7 7 0 0 1-7 7H99l-7 7 1-7h-7a7 7 0 0 1-7-7V96a7 7 0 0 1 7-7Z" fill="#fffef7" stroke="#78a46f" stroke-width="2"/>
+        <circle cx="91" cy="102" r="2" fill="#78a46f"/><circle cx="98" cy="102" r="2" fill="#78a46f"/><circle cx="105" cy="102" r="2" fill="#78a46f"/>
+      </svg>
+      <span class="assistant-online-dot" aria-hidden="true"></span>
+    </button>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
+
+

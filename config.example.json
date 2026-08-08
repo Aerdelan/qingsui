@@ -1,0 +1,48 @@
+﻿{
+  "app": {
+    "host": "0.0.0.0",
+    "port": 8765,
+    "open_browser": true
+  },
+  "bootstrap": {
+    "auto_download_models": true
+  },
+  "translation": {
+    "provider": "ollama",
+    "model_id": "shun89/opus-mt-ja-zh",
+    "ollama_model": "qwen3.5:2b",
+    "ollama_base_url": "http://127.0.0.1:11434",
+    "style_profile": "acgn_colloquial",
+    "temperature": 0.25,
+    "context_chars": 1800,
+    "context_segments": 4,
+    "batch_size": 8,
+    "max_input_chars": 420,
+    "target_language": "简体中文"
+  },
+  "ocr": {
+    "provider": "easyocr",
+    "languages": ["ja", "en"],
+    "gpu": "auto",
+    "min_confidence": 0.25
+  },
+  "rendering": {
+    "font_path": null,
+    "font_min_size": 12,
+    "font_max_size": 72,
+    "mask_padding": 3,
+    "inpaint_radius": 3
+  },
+  "limits": {
+    "max_upload_mb": 1024,
+    "max_archive_files": 5000,
+    "max_extracted_mb": 4096
+  }
+}
+
+
+
+
+
+
+

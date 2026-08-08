@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aoba-translator"
+version = "0.1.0"
+description = "Local-first Japanese novel and manga translation workspace"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Aoba Translator Contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+ml = [
+  "easyocr>=1.7.2,<2",
+  "huggingface-hub>=0.27,<2",
+  "opencv-python-headless>=4.10,<5",
+  "Pillow>=10.4,<13",
+  "sentencepiece>=0.2,<1",
+  "sacremoses>=0.1,<1",
+  "torch>=2.4,<3",
+  "torchvision>=0.19,<1",
+  "transformers>=4.46,<6",
+]
+archives = [
+  "py7zr>=0.22,<2",
+  "rarfile>=4.2,<5",
+]
+dev = ["pytest>=8.3,<9"]
+
+[project.scripts]
+aoba-translator = "aoba_translator.__main__:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+aoba_translator = ["web/*"]
