@@ -29,6 +29,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "languages": ["ja", "en"],
         "gpu": "auto",
         "min_confidence": 0.25,
+        "text_threshold": 0.5,
+        "low_text": 0.3,
+        "link_threshold": 0.3,
+        "canvas_size": 2560,
+        "min_region_size": 8,
     },
     "rendering": {
         "font_path": None,

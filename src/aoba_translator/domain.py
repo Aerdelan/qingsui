@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -23,6 +23,8 @@ class TextRegion:
     translated_text: str = ""
     orientation: Literal["horizontal", "vertical"] = "horizontal"
     text_color: tuple[int, int, int] = (30, 30, 30)
+    weight: Literal["normal", "bold"] = "normal"
+    background_color: tuple[int, int, int] = (255, 255, 255)
 
     @property
     def bounds(self) -> tuple[int, int, int, int]:

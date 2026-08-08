@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -16,34 +16,56 @@ def _overlap(start_a: int, end_a: int, start_b: int, end_b: int) -> int:
     return max(0, min(end_a, end_b) - max(start_a, start_b))
 
 
+def _char_size(region: TextRegion) -> int:
+    """估算单个文字块的字符尺寸：横排取行高，竖排取列宽。"""
+    x0, y0, x1, y1 = region.bounds
+    if region.orientation == "vertical":
+        return max(1, x1 - x0)
+    return max(1, y1 - y0)
+
+
 def _should_merge(left: TextRegion, right: TextRegion) -> bool:
+    if left.orientation != right.orientation:
+        return False
     ax0, ay0, ax1, ay1 = left.bounds
     bx0, by0, bx1, by1 = right.bounds
     aw, ah = max(1, ax1 - ax0), max(1, ay1 - ay0)
     bw, bh = max(1, bx1 - bx0), max(1, by1 - by0)
-    if left.orientation == right.orientation == "vertical":
+    size_left = _char_size(left)
+    size_right = _char_size(right)
+    # 字号差异过大的区域（如标题与正文）不应合并。
+    larger, smaller = max(size_left, size_right), max(1, min(size_left, size_right))
+    if larger / smaller > 2.5:
+        return False
+    char_size = (size_left + size_right) / 2
+    if left.orientation == "vertical":
         horizontal_gap = max(0, max(ax0, bx0) - min(ax1, bx1))
         vertical_overlap = _overlap(ay0, ay1, by0, by1)
-        return horizontal_gap <= max(aw, bw) * 1.2 and vertical_overlap >= min(ah, bh) * 0.2
-    if left.orientation == right.orientation == "horizontal":
-        vertical_gap = max(0, max(ay0, by0) - min(ay1, by1))
-        horizontal_overlap = _overlap(ax0, ax1, bx0, bx1)
-        return vertical_gap <= max(ah, bh) * 1.0 and horizontal_overlap >= min(aw, bw) * 0.15
-    return False
+        return horizontal_gap <= char_size * 1.8 and vertical_overlap >= min(ah, bh) * 0.2
+    vertical_gap = max(0, max(ay0, by0) - min(ay1, by1))
+    horizontal_overlap = _overlap(ax0, ax1, bx0, bx1)
+    return vertical_gap <= char_size * 2.0 and horizontal_overlap >= min(aw, bw) * 0.15
+
+
+def _groups_connected(group_a: list[TextRegion], group_b: list[TextRegion]) -> bool:
+    return any(_should_merge(a, b) for a in group_a for b in group_b)
 
 
 def merge_regions(regions: Sequence[TextRegion]) -> list[TextRegion]:
-    groups: list[list[TextRegion]] = []
-    for region in regions:
-        matching = [group for group in groups if any(_should_merge(region, item) for item in group)]
-        if not matching:
-            groups.append([region])
-            continue
-        primary = matching[0]
-        primary.append(region)
-        for extra in matching[1:]:
-            primary.extend(extra)
-            groups.remove(extra)
+    groups: list[list[TextRegion]] = [[region] for region in regions]
+    # 迭代合并直到稳定，确保间接相邻的区域也被归入同组。
+    changed = True
+    while changed:
+        changed = False
+        for i in range(len(groups)):
+            for j in range(i + 1, len(groups)):
+                if _groups_connected(groups[i], groups[j]):
+                    groups[i].extend(groups[j])
+                    del groups[j]
+                    changed = True
+                    break
+            if changed:
+                break
 
     merged: list[TextRegion] = []
     for group in groups:
