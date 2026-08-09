@@ -108,6 +108,38 @@ def _groups_connected(
     return any(_should_merge(a, b) for a in group_a for b in group_b)
 
 
+def _order_vertical(group: Sequence[TextRegion]) -> list[TextRegion]:
+    """竖排多列文本排序：按从右到左的列阅读。
+
+    直接按 (−x, y) 排序时，同一列内高低错开的框会被另一列的框插队，
+    拼出的文本顺序错乱（翻译随之乱码）。先把水平重叠的框归入同一列
+    （按重叠量取整），列按右→左排，列内按上→下排。
+    """
+    items = sorted(group, key=lambda item: -item.bounds[0])
+    columns: list[list[TextRegion]] = []
+    for item in items:
+        _, y0, _, y1 = item.bounds
+        best_column: list[TextRegion] | None = None
+        best_overlap = 0
+        for column in columns:
+            col_y0 = min(member.bounds[1] for member in column)
+            col_y1 = max(member.bounds[3] for member in column)
+            overlap = _overlap(y0, y1, col_y0, col_y1)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_column = column
+        if best_column is not None and best_overlap >= max(1, min(y1 - y0, 4)):
+            best_column.append(item)
+        else:
+            columns.append([item])
+    ordered: list[TextRegion] = []
+    for column in sorted(
+        columns, key=lambda column: -max(member.bounds[2] for member in column)
+    ):
+        ordered.extend(sorted(column, key=lambda item: item.bounds[1]))
+    return ordered
+
+
 def merge_regions(regions: Sequence[TextRegion], max_group_area: float = 0) -> list[TextRegion]:
     groups: list[list[TextRegion]] = [[region] for region in regions]
     # 迭代合并直到稳定，确保间接相邻的区域也被归入同组。
@@ -131,7 +163,7 @@ def merge_regions(regions: Sequence[TextRegion], max_group_area: float = 0) -> l
             continue
         orientation = group[0].orientation
         if orientation == "vertical":
-            ordered = sorted(group, key=lambda item: (-item.bounds[0], item.bounds[1]))
+            ordered = _order_vertical(group)
         else:
             ordered = sorted(group, key=lambda item: (item.bounds[1], item.bounds[0]))
         x0 = min(item.bounds[0] for item in group)

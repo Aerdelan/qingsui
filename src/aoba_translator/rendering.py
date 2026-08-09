@@ -116,11 +116,13 @@ def _text_mask_and_color(image, region: TextRegion, padding: int):
     glyph_mask = cv2.morphologyEx(glyph_mask, cv2.MORPH_CLOSE, kernel)
     glyph_mask = cv2.dilate(glyph_mask, kernel, iterations=1)
 
-    # 颜色采样：只取与背景色差最大的前 40% 像素，避免背景渗漏稀释文字色。
+    # 颜色采样：在亮度维度上取与背景反差最大的前 20% 像素（笔画核心），
+    # 避免抗锯齿灰边稀释文字色，再以 RGB 中位数还原色彩。
     selected = crop[glyph_mask > 0]
     if selected.size:
-        diffs = np.linalg.norm(selected.astype(np.float32) - background, axis=1)
-        keep = max(1, int(diffs.size * 0.4))
+        sel_luma = selected.astype(np.float32).mean(axis=1)
+        diffs = np.abs(sel_luma - float(background.mean()))
+        keep = max(1, int(diffs.size * 0.2))
         indices = np.argpartition(diffs, -keep)[-keep:]
         color = tuple(int(value) for value in np.median(selected[indices], axis=0))
     else:
@@ -159,16 +161,16 @@ def erase_original_text(image, regions: Sequence[TextRegion], padding: int, radi
         region_slice = (slice(y0, y1 + 1), slice(x0, x1 + 1))
         # 边框颜色均匀（气泡/旁白框）时直接用背景色平铺填充，
         # 比 inpaint 更干净，也不会把周边画稿涂抹进来。
+        # 只填充字形掩码适度外扩的范围，不铺满整个多边形，
+        # 避免擦除越过气泡边界盖到装饰边框或画稿。
         if border_std < 20.0:
-            polygon_global = _polygon_mask(
-                image.shape[1],
-                image.shape[0],
-                [(x, y) for x, y in region.polygon],
+            dilation = max(2, min(4, padding))
+            local_dilated = cv2.dilate(
+                local_mask, np.ones((3, 3), dtype=np.uint8), iterations=dilation
             )
-            local_dilated = cv2.dilate(local_mask, np.ones((3, 3), dtype=np.uint8), iterations=padding)
             local_global = np.zeros(image.shape[:2], dtype=np.uint8)
             local_global[region_slice] = local_dilated
-            flat_fills.append((np.maximum(polygon_global, local_global), background))
+            flat_fills.append((local_global, background))
         else:
             full_mask[region_slice] = np.maximum(full_mask[region_slice], local_mask)
         region.text_color = color
