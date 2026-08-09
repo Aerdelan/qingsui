@@ -12,7 +12,7 @@
 - **Social preview**：上传 `docs/assets/social-preview.png`（已生成）
 - 勾选 Releases 展示区（默认开启）
 
-⚠️ 替换 `README.md` 徽章中的 `YOUR_GITHUB_USERNAME/aoba-translator` 为真实仓库地址（2 处）。
+⚠️ 仓库地址徽章已填为 `Aerdelan/aoba-translator`：若最终不改名，把 README.md 徽章中的仓库名改回实际名称（1 行）。建议在 Settings 把仓库重命名为 `aoba-translator`（旧地址自动重定向）。
 
 ⚠️ 在 **Issues → Labels** 中创建 `good first issue` 标签，并给 1-2 个简单任务打上（例如"Linux 启动脚本 start.sh"、"Dockerfile"）。
 

@@ -4,7 +4,7 @@
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-yellow)](https://www.python.org/)
-[![Tests](https://github.com/YOUR_GITHUB_USERNAME/aoba-translator/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_GITHUB_USERNAME/aoba-translator/actions/workflows/ci.yml)
+[![Tests](https://github.com/Aerdelan/aoba-translator/actions/workflows/ci.yml/badge.svg)](https://github.com/Aerdelan/aoba-translator/actions/workflows/ci.yml)
 
 A **local-first** web app that automatically translates **Japanese novels and manga** into Chinese — OCR, LLM translation, text erasure and re-typesetting all run **entirely on your own machine**. No cloud, no API keys, nothing leaves your computer.
 
