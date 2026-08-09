@@ -21,6 +21,20 @@ A **local-first** web app that automatically translates **Japanese novels and ma
 - ✍️ **Faithful re-typesetting** — vertical/horizontal direction, text color and font size are estimated from the original page.
 - 🧸 **Built-in diagnosis assistant "Aoba"** — paste any error into the in-app chat and the local LLM explains it using your logs and config.
 
+## Screenshots
+
+**1. Drop it in, the pipeline does the rest** — upload a novel `.txt` or manga `.zip/.cbz` and the five-step flow runs automatically: detect type → OCR / segment → translate → erase & re-typeset → pack ZIP. The runtime card shows model readiness and LAN access URLs.
+
+![Home: upload & runtime status](docs/assets/screenshot-home.png)
+
+**2. Live job queue** — every task gets a progress card; finished output stays in `data/output/` with a full `translation-report.json`.
+
+![Job queue: task completed](docs/assets/screenshot-jobs.png)
+
+**3. ⭐ "Aoba" — a local AI support engineer living in your app.** Click the assistant in the corner and it instantly greets you with your *actual* runtime environment: OS, CPU/GPU, model status, recent job failures — because it reads your local diagnostics before answering. Paste any PowerShell output or error log and it explains what went wrong and how to fix it. All conversations run through your local Ollama model: **your questions and logs never leave your machine**, just like your translations.
+
+![Aoba assistant: local AI diagnosis chat](docs/assets/screenshot-assistant.png)
+
 ## How it works
 
 ```mermaid
