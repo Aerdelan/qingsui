@@ -37,7 +37,6 @@ class ModelManager:
         self.config = config
         self.translation_dir = config.models_dir / "translation"
         self.ocr_dir = config.models_dir / "easyocr"
-        self.manga_ocr_dir = config.models_dir / "manga_ocr"
 
     def _translation_ready(self) -> bool:
         if not (self.translation_dir / "config.json").exists():
@@ -50,12 +49,8 @@ class ModelManager:
         model_files = list(self.ocr_dir.glob("*.pth")) + list(self.ocr_dir.glob("*.pt"))
         return len(model_files) >= 2
 
-    def _manga_ocr_ready(self) -> bool:
-        if not (self.manga_ocr_dir / "config.json").exists():
-            return False
-        return any(self.manga_ocr_dir.glob("pytorch_model*.bin")) or any(
-            self.manga_ocr_dir.glob("model*.safetensors")
-        )
+    def _manga_vision_model(self) -> str:
+        return str(self.config.section("ocr").get("vision_model", "glm-ocr"))
 
     def _ocr_provider(self) -> str:
         return str(self.config.section("ocr").get("provider", "manga")).lower()
@@ -100,10 +95,8 @@ class ModelManager:
         ocr_ready = self._ocr_ready()
         ocr_provider = self._ocr_provider()
         if ocr_provider == "manga":
-            ocr_ready = ocr_ready and self._manga_ocr_ready()
+            ocr_ready = ocr_ready and self._ollama_model_ready(self._manga_vision_model())
         dependency_names = ["easyocr", "cv2", "numpy", "PIL", "torch"]
-        if ocr_provider == "manga":
-            dependency_names.append("manga_ocr")
         if provider == "transformers":
             dependency_names.append("transformers")
         dependencies = {
@@ -134,8 +127,6 @@ class ModelManager:
         provider = str(self.config.section("translation").get("provider", "ollama")).lower()
         if provider == "transformers" and importlib.util.find_spec("transformers") is None:
             missing.append("transformers")
-        if self._ocr_provider() == "manga" and importlib.util.find_spec("manga_ocr") is None:
-            missing.append("manga_ocr")
         if missing:
             message = missing_dependencies_message(missing)
             self._save_error(message)
@@ -154,7 +145,7 @@ class ModelManager:
 
             self._prepare_easyocr(report)
             if self._ocr_provider() == "manga":
-                self._prepare_manga_ocr(report)
+                self._prepare_vision_model(report)
             runtime = self.config.load_runtime()
             runtime.update(
                 {
@@ -260,37 +251,31 @@ class ModelManager:
         )
         report(95, "OCR 模型下载完成")
 
-    def _prepare_manga_ocr(self, report: ProgressCallback) -> None:
-        """下载漫画专用识别模型 kha-white/manga-ocr-base（约 430MB）。"""
-        if self._manga_ocr_ready():
-            report(96, "漫画 OCR 模型已存在")
+    def _prepare_vision_model(self, report: ProgressCallback) -> None:
+        """确保 Ollama 视觉识别模型（默认 glm-ocr）已拉取到本机。"""
+        model = self._manga_vision_model()
+        if self._ollama_model_ready(model):
+            report(96, f"视觉 OCR 模型 {model} 已存在")
             return
-        try:
-            from huggingface_hub import snapshot_download
-        except ImportError as exc:
-            raise ModelSetupError("缺少 huggingface-hub，无法下载漫画 OCR 模型。") from exc
-
-        model_id = str(self.config.section("ocr").get("manga_model_id", "kha-white/manga-ocr-base"))
-        report(95, f"准备下载漫画 OCR 模型 {model_id}")
-        os.environ.setdefault("HF_HOME", str(self.config.models_dir / "huggingface"))
-        self.manga_ocr_dir.mkdir(parents=True, exist_ok=True)
-        tracker = _DownloadTracker(model_id, report, start=95, end=99)
-        download_kwargs: dict[str, Any] = {}
-        if _HfTqdm is not None:
-            download_kwargs["tqdm_class"] = tracker.make_bar_class()
-        try:
-            snapshot_download(
-                repo_id=model_id,
-                local_dir=str(self.manga_ocr_dir),
-                ignore_patterns=("*.h5", "*.msgpack", "*.ot"),
-                **download_kwargs,
-            )
-        except Exception as exc:
+        executable = shutil.which("ollama")
+        if not executable:
             raise ModelSetupError(
-                f"漫画 OCR 模型下载失败：{exc}。若为网络问题，可设置环境变量 HF_ENDPOINT "
-                "（如 https://hf-mirror.com）后在设置页重新执行初始化。"
-            ) from exc
-        report(99, "漫画 OCR 模型下载完成")
+                "未找到 Ollama。请先执行：winget install --id Ollama.Ollama --exact，"
+                "安装完成后重新运行 start.ps1。"
+            )
+        report(95, f"拉取视觉 OCR 模型 {model}（用于漫画文字识别，体积较大请耐心等待）")
+        completed = subprocess.run(
+            [executable, "pull", model],
+            capture_output=True,
+            text=True,
+            timeout=7200,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise ModelSetupError(
+                completed.stderr.strip() or f"视觉 OCR 模型 {model} 拉取失败。"
+            )
+        report(99, "视觉 OCR 模型准备完成")
 
     @staticmethod
     def _apply_easyocr_mirror(easyocr_module: Any, mirror: str) -> None:

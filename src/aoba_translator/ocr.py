@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import base64
+import io
+import json
+import re
+import urllib.error
+import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
@@ -254,12 +260,140 @@ class EasyOcrEngine:
         return regions
 
 
-class HybridMangaOcrEngine:
-    """用 EasyOCR CRAFT 检测文字区域，再用漫画专用模型 manga-ocr 逐区域识别。
+def _collapse_repeats(text: str) -> str:
+    """折叠 VLM 循环输出：同一子串连续重复 3 次以上时只保留一份。"""
+    length = len(text)
+    for unit in range(4, length // 3 + 1):
+        segment = text[:unit]
+        index = unit
+        count = 1
+        while text[index : index + unit] == segment:
+            count += 1
+            index += unit
+        if count >= 3:
+            remainder = text[index:]
+            # 尾部残留的不完整重复也一并丢弃
+            if segment.startswith(remainder):
+                remainder = ""
+            return segment + remainder
+    return text
 
-    EasyOCR 的识别模型对漫画装饰字体置信度系统性偏低，而 manga-ocr
-    （kha-white/manga-ocr-base）专为日文漫画训练，支持竖排与气泡字体。
-    因此只借用 CRAFT 的检测能力，识别交给 manga-ocr。
+
+# glm-ocr 在部分输入下会回声转写指令或以 markdown 包装输出，这些行不是图片内容。
+_PROMPT_ECHO_KEYWORDS = (
+    "转写",
+    "只输出",
+    "阅读顺序",
+    "保持原文",
+    "不加任何",
+    "不含其他",
+    "请照",
+    "照原样",
+    "请按照图片",
+    "写出以下",
+    "transcribe",
+    "the text is",
+    "as accurately as possible",
+    "markdown",
+)
+
+
+def _collapse_line_blocks(lines: list[str]) -> list[str]:
+    """折叠行序列中重复出现的整块内容（VLM 循环输出的另一种形态）。
+
+    重复块之间可能存在微小差异（错字、空格），因此块比较用相似度判定。
+    """
+    import difflib
+
+    def block_equal(first: list[str], second: list[str]) -> bool:
+        if first == second:
+            return True
+        joined_a = "".join(first)
+        joined_b = "".join(second)
+        if not joined_a or not joined_b:
+            return False
+        return difflib.SequenceMatcher(None, joined_a, joined_b).ratio() >= 0.75
+
+    total = len(lines)
+    kept: list[str] = []
+    index = 0
+    while index < total:
+        matched_block = False
+        for size in range(1, (total - index) // 3 + 1):
+            block = lines[index : index + size]
+            cursor = index + size
+            count = 1
+            while cursor + size <= total and block_equal(block, lines[cursor : cursor + size]):
+                count += 1
+                cursor += size
+            if count < 3:
+                continue
+            kept.extend(block)
+            # 尾部残留的不完整重复块丢弃
+            remainder = lines[cursor:]
+            if remainder and block_equal(block[: len(remainder)], remainder):
+                cursor = total
+            index = cursor
+            matched_block = True
+            break
+        if not matched_block:
+            kept.append(lines[index])
+            index += 1
+    return kept
+
+
+def _truncate_loop_text(text: str) -> str:
+    """若文本后半部分是前文尾部的近似重复（VLM 循环输出），只保留首次出现。
+
+    仅在行边界切分（避免截断半行），要求重复段至少 8 个字符、
+    与前文尾部相似度 ≥0.7；多个切分点命中时取最短前缀。
+    """
+    import difflib
+
+    length = len(text)
+    for size in range(4, length):
+        if not (size == length or text[size] == "\n" or text[size - 1] == "\n"):
+            continue
+        head = text[:size]
+        rest = text[size:]
+        if len(rest) < 8 or len(rest) > len(head):
+            continue
+        tail = head[-len(rest):]
+        if difflib.SequenceMatcher(None, tail, rest).ratio() >= 0.7:
+            return head.rstrip()
+    return text
+
+
+def _clean_recognition(text: str) -> str:
+    """清洗视觉模型识别结果：去 markdown/HTML 标记、指令回声与重复行/块。"""
+    text = _collapse_repeats(text)
+    cleaned: list[str] = []
+    for line in text.splitlines():
+        line = line.strip().strip("`").strip().replace("*", "").lstrip("#").strip()
+        # HTML 标记只去掉标签，保留标签内的文字内容
+        line = re.sub(r"<[^>]+>", " ", line)
+        line = re.sub(r"\s+", "", line)
+        if not line:
+            continue
+        lowered = line.lower()
+        if any(keyword in lowered for keyword in _PROMPT_ECHO_KEYWORDS):
+            continue
+        cleaned.append(line)
+    collapsed = _collapse_line_blocks(cleaned)
+    deduped: list[str] = []
+    for line in collapsed:
+        if deduped and deduped[-1] == line:
+            continue
+        deduped.append(line)
+    return _truncate_loop_text("\n".join(deduped)).strip()
+
+
+class HybridMangaOcrEngine:
+    """用 EasyOCR CRAFT 检测文字区域，再用 Ollama 视觉模型（默认 glm-ocr）逐区域识别。
+
+    EasyOCR 的识别模型对漫画装饰字体置信度系统性偏低，小型序列模型
+    （如 manga-ocr）对宣传艺术字也会误识；视觉大模型对装饰字、特效字、
+    复杂背景文字的鲁棒性更好，因此只借用 CRAFT 的检测能力，识别交给视觉模型。
     """
 
     name = "manga"
@@ -280,6 +414,12 @@ class HybridMangaOcrEngine:
         # 单个检测框面积超过整图的该比例时丢弃：这种框几乎必然横跨多个面板
         # 并覆盖画稿主体，识别拼接出的文本顺序错乱，擦除时也会涂抹画面。
         self._max_region_area_ratio = float(config.get("max_region_area_ratio", 0.12))
+        # 视觉识别模型（Ollama）：默认 glm-ocr，对装饰艺术字鲁棒。
+        self._vision_model = str(config.get("vision_model", "glm-ocr"))
+        self._endpoint = str(
+            config.get("ollama_base_url", "http://127.0.0.1:11434")
+        ).rstrip("/") + "/api/generate"
+        self._vision_timeout = float(config.get("vision_timeout", 300))
         quantize = bool(config.get("quantize", False))
         # recognizer=False：只加载 CRAFT 检测模型，不加载识别模型，节省内存。
         self._reader = easyocr.Reader(
@@ -291,25 +431,43 @@ class HybridMangaOcrEngine:
             download_enabled=False,
             verbose=False,
         )
-        self._manga_model_dir = manga_model_dir
-        self._mocr = None
 
-    def _get_mocr(self):
-        if self._mocr is None:
-            try:
-                from manga_ocr import MangaOcr
-            except ImportError as exc:
-                raise OcrError(f"manga-ocr 依赖未安装。{start_command_hint()}") from exc
-            try:
-                if self._manga_model_dir and (self._manga_model_dir / "config.json").exists():
-                    self._mocr = MangaOcr(pretrained_model_name_or_path=str(self._manga_model_dir))
-                else:
-                    self._mocr = MangaOcr()
-            except Exception as exc:
-                raise OcrError(
-                    f"manga-ocr 初始化失败：{exc}。若为网络问题，请在设置页重新执行初始化。"
-                ) from exc
-        return self._mocr
+    def _recognize_crop(self, crop) -> str:
+        """把裁块交给 Ollama 视觉模型识别，返回原文文本。"""
+        buffer = io.BytesIO()
+        crop.save(buffer, format="PNG")
+        image_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+        payload = json.dumps(
+            {
+                "model": self._vision_model,
+                "stream": False,
+                "prompt": "Convert the text in the image to Markdown format:",
+                "images": [image_b64],
+                "options": {
+                    "temperature": 0.0,
+                    "num_predict": 256,
+                    "repeat_penalty": 1.15,
+                },
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            self._endpoint,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self._vision_timeout) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except (TimeoutError, OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+            raise OcrError(
+                f"无法调用视觉识别模型 {self._vision_model}：请确认 Ollama 已启动且已拉取该模型。"
+            ) from exc
+        if body.get("error"):
+            raise OcrError(f"视觉识别模型返回错误：{body['error']}")
+        text = str(body.get("response") or "").strip()
+        return _clean_recognition(text)
 
     def _detect_boxes(self, image_path: Path) -> list[list[tuple[int, int]]]:
         try:
@@ -368,7 +526,6 @@ class HybridMangaOcrEngine:
         if not merged:
             return []
 
-        mocr = self._get_mocr()
         regions: list[TextRegion] = []
         for region in merged:
             x0, y0, x1, y1 = region.bounds
@@ -383,7 +540,9 @@ class HybridMangaOcrEngine:
                 )
             )
             try:
-                text = mocr(crop).strip()
+                text = self._recognize_crop(crop)
+            except OcrError:
+                raise
             except Exception:
                 text = ""
             if not text or _is_noise_text(text):

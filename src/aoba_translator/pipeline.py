@@ -62,7 +62,6 @@ class TranslationPipeline:
                     self._ocr = HybridMangaOcrEngine(
                         ocr_config,
                         self.model_manager.ocr_dir,
-                        self.model_manager.manga_ocr_dir,
                     )
                 else:
                     self._ocr = EasyOcrEngine(ocr_config, self.model_manager.ocr_dir)

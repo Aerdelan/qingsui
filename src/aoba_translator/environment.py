@@ -102,7 +102,6 @@ def inspect_environment() -> EnvironmentReport:
         "cv2",
         "easyocr",
         "huggingface_hub",
-        "manga_ocr",
         "numpy",
         "PIL",
         "sentencepiece",

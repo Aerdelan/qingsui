@@ -26,6 +26,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "ocr": {
         "provider": "manga",
+        "vision_model": "glm-ocr",
+        "ollama_base_url": "http://127.0.0.1:11434",
+        "vision_timeout": 300,
         "languages": ["ja", "en"],
         "gpu": "auto",
         "min_confidence": 0.1,
