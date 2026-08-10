@@ -7,6 +7,36 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Venv = Join-Path $Root ".venv"
 $Python = $null
+$LowResource = $false
+
+# 资源闸：磁盘剩余 < 10GB 或内存 < 12GB 时禁用初始化，防止模型加载拖垮服务报 502
+function Test-Resources {
+    $script:LowResource = $false
+    $reasons = @()
+    try {
+        $memoryGB = [math]::Round(((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB), 1)
+        if ($memoryGB -lt 12) { $reasons += "运行内存 $($memoryGB)GB（需 12GB 以上）" }
+    } catch { }
+    try {
+        $driveLetter = (Split-Path -Qualifier $Root).TrimEnd(':')
+        $freeGB = [math]::Round(((Get-PSDrive -Name $driveLetter).Free / 1GB), 1)
+        if ($freeGB -lt 10) { $reasons += "磁盘剩余 $($freeGB)GB（需 10GB 以上）" }
+    } catch { }
+    if ($reasons.Count -gt 0) {
+        $script:LowResource = $true
+        Write-Host ""
+        Write-Host "============================================================" -ForegroundColor Red
+        Write-Host "  警告：当前服务器配置不支持脚本启动（完整功能）" -ForegroundColor Red
+        foreach ($reason in $reasons) {
+            Write-Host "  - $reason" -ForegroundColor Red
+        }
+        Write-Host "  请更换更高性能的服务器。本次已禁用模型与依赖初始化，" -ForegroundColor Red
+        Write-Host "  仅以降级模式启动服务。" -ForegroundColor Red
+        Write-Host "============================================================" -ForegroundColor Red
+        Write-Host ""
+    }
+}
+Test-Resources
 
 function Find-Python {
     $candidates = @(
@@ -61,14 +91,21 @@ if (-not $venvHealthy) {
     if ($LASTEXITCODE -ne 0) { throw "虚拟环境创建失败，请确认 Python 3.11 已正确安装。" }
 }
 Write-Host "[2/4] 检查项目依赖..." -ForegroundColor Green
-& $VenvPython -m pip install --disable-pip-version-check --upgrade pip
-if ($LASTEXITCODE -ne 0) { throw "pip 升级失败，请检查网络或 Python 环境。" }
-& $VenvPython -m pip install --disable-pip-version-check -e "${Root}[ml,archives]"
-if ($LASTEXITCODE -ne 0) { throw "项目依赖安装失败，请修复上面的 pip 错误后重新运行 start.ps1。" }
+if ($LowResource) {
+    Write-Host "低配模式：跳过依赖安装与升级。" -ForegroundColor Yellow
+} else {
+    & $VenvPython -m pip install --disable-pip-version-check --upgrade pip
+    if ($LASTEXITCODE -ne 0) { throw "pip 升级失败，请检查网络或 Python 环境。" }
+    & $VenvPython -m pip install --disable-pip-version-check -e "${Root}[ml,archives]"
+    if ($LASTEXITCODE -ne 0) { throw "项目依赖安装失败，请修复上面的 pip 错误后重新运行 start.ps1。" }
+}
 
 # 检查 Ollama（翻译引擎）
 $ollama = Get-Command ollama -ErrorAction SilentlyContinue
 if (-not $ollama) {
+    if ($LowResource) {
+        Write-Host "[3/4] 低配模式：跳过 Ollama 检测与安装。" -ForegroundColor Yellow
+    } else {
     Write-Host "[3/4] 未检测到 Ollama（本地翻译引擎）..." -ForegroundColor Yellow
     $winget = Get-Command winget -ErrorAction SilentlyContinue
     if ($winget) {
@@ -86,12 +123,13 @@ if (-not $ollama) {
     } else {
         Write-Host "未找到 winget，请手动安装 Ollama：https://ollama.com/download" -ForegroundColor Yellow
     }
+    }
 } else {
     Write-Host "[3/4] Ollama 已就绪。" -ForegroundColor Green
 }
 
 $arguments = @("-m", "aoba_translator", "serve")
-if ($SkipModelDownload) { $arguments += "--skip-model-download" }
+if ($SkipModelDownload -or $LowResource) { $arguments += "--skip-model-download" }
 if ($NoBrowser) { $arguments += "--no-browser" }
 
 Write-Host "[4/4] 启动青穗翻译台..." -ForegroundColor Green
