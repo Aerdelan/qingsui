@@ -13,9 +13,11 @@ from aoba_translator.assistant import AssistantError, PROJECT_SYSTEM_PROMPT, Pro
 from aoba_translator.archive import (
     ArchiveError,
     classify_files,
+    classify_input,
     collect_content_files,
     extract_archive,
 )
+from aoba_translator.epub import EpubError, translate_epub
 from aoba_translator.config import load_config
 from aoba_translator.manga import merge_regions
 from aoba_translator.messages import START_COMMAND, missing_dependencies_message
@@ -191,6 +193,88 @@ class PipelineTests(unittest.TestCase):
                 translated = archive.read("novel_zh.txt").decode("utf-8-sig")
                 self.assertEqual(translated, "これは物語です。\n")
                 self.assertIn("translation-report.json", archive.namelist())
+
+
+class EpubTests(unittest.TestCase):
+    def _build_epub(self, path: Path) -> None:
+        chapter1 = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ja"><head><title>ch1</title></head>'
+            '<body><p class="calibre2"><ruby>物語<rt>ものがたり</rt></ruby>は始まる。</p>'
+            '<p class="calibre2"><img src="../images/00001.jpeg"/></p>'
+            '<p class="calibre2">English only paragraph.</p></body></html>'
+        )
+        chapter2 = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ja"><head><title>ch2</title></head>'
+            '<body><blockquote><p>続きを書く。</p></blockquote></body></html>'
+        )
+        opf = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<package xmlns="http://www.idpf.org/2007/opf" version="2.0">'
+            "<manifest>"
+            '<item id="c2" href="text/part0002.html" media-type="application/xhtml+xml"/>'
+            '<item id="c1" href="text/part0001.html" media-type="application/xhtml+xml"/>'
+            "</manifest>"
+            '<spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>'
+        )
+        container = (
+            '<?xml version="1.0"?><container version="1.0" '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+            '<rootfiles><rootfile full-path="content.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>'
+        )
+        with zipfile.ZipFile(path, mode="w") as archive:
+            archive.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip")
+            archive.writestr("META-INF/container.xml", container)
+            archive.writestr("content.opf", opf)
+            archive.writestr("text/part0001.html", chapter1)
+            archive.writestr("text/part0002.html", chapter2)
+            archive.writestr("images/00001.jpeg", b"\xff\xd8fake-image-bytes")
+
+    def test_epub_translation_keeps_images_and_ruby_base(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "book.epub"
+            self._build_epub(source)
+            translator = ContextTranslator()
+            destination = root / "book_zh.epub"
+            metadata = translate_epub(source, destination, translator, batch_size=1)
+            self.assertEqual(metadata["segments"], 2)
+            self.assertEqual(metadata["chapters"], 2)
+            self.assertEqual(metadata["images_kept"], 1)
+            with zipfile.ZipFile(destination) as archive:
+                names = archive.namelist()
+                self.assertEqual(names[0], "mimetype")
+                self.assertEqual(archive.getinfo("mimetype").compress_type, zipfile.ZIP_STORED)
+                chapter1 = archive.read("text/part0001.html").decode("utf-8")
+                # ruby 注音被剥离后翻译，英文段落与图片段落保持原样
+                self.assertIn("中:物語は始まる。", chapter1)
+                self.assertNotIn("ものがたり", chapter1)
+                self.assertIn("English only paragraph.", chapter1)
+                self.assertIn('<img src="../images/00001.jpeg"/>', chapter1)
+                chapter2 = archive.read("text/part0002.html").decode("utf-8")
+                self.assertIn("中:続きを書く。", chapter2)
+                self.assertIn("<blockquote>", chapter2)
+                self.assertEqual(archive.read("images/00001.jpeg"), b"\xff\xd8fake-image-bytes")
+            # 上下文跨章节传递
+            self.assertTrue(any("中:物語は始まる。" in context for context in translator.contexts))
+
+    def test_epub_without_japanese_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "empty.epub"
+            with zipfile.ZipFile(source, mode="w") as archive:
+                archive.writestr("mimetype", "application/epub+zip")
+                archive.writestr(
+                    "text/part0001.html",
+                    '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Hello.</p></body></html>',
+                )
+            with self.assertRaises(EpubError):
+                translate_epub(source, root / "out.epub", ContextTranslator())
+
+    def test_classify_input_recognizes_epub(self) -> None:
+        self.assertEqual(classify_input(Path("book.epub")), "epub")
 
 
 class MessageTests(unittest.TestCase):

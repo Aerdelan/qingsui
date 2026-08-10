@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import re
 import shutil
@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 
 ARCHIVE_EXTENSIONS = {".zip", ".cbz", ".7z", ".rar"}
 TEXT_EXTENSIONS = {".txt", ".md"}
+EPUB_EXTENSIONS = {".epub"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 IGNORED_NAMES = {"thumbs.db", ".ds_store"}
 
@@ -146,6 +147,8 @@ def classify_input(path: Path) -> str:
     extension = path.suffix.lower()
     if extension in TEXT_EXTENSIONS:
         return "novel"
+    if extension in EPUB_EXTENSIONS:
+        return "epub"
     if extension in IMAGE_EXTENSIONS:
         return "manga"
     if extension in ARCHIVE_EXTENSIONS:

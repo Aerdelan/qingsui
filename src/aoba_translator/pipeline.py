@@ -9,6 +9,7 @@ from typing import Callable
 
 from .archive import (
     ARCHIVE_EXTENSIONS,
+    EPUB_EXTENSIONS,
     IMAGE_EXTENSIONS,
     TEXT_EXTENSIONS,
     classify_files,
@@ -18,6 +19,7 @@ from .archive import (
     extract_archive,
 )
 from .config import AppConfig
+from .epub import EpubError, translate_epub
 from .manga import translate_manga_images
 from .models import ModelManager
 from .novel import translate_novel
@@ -118,6 +120,10 @@ class TranslationPipeline:
             details = self._process_manga(
                 files, content_root, product_dir, translator, report
             )
+        elif detected == "epub":
+            details = self._process_epub(
+                files, content_root, product_dir, translator, report
+            )
         else:
             raise PipelineError(f"无法处理输入类型：{detected}")
 
@@ -181,6 +187,43 @@ class TranslationPipeline:
                 context_chars=int(translation.get("context_chars", 1800)),
                 progress=item_progress,
             )
+            entries.append({"file": relative.as_posix(), **metadata})
+        return {"documents": entries, "count": len(entries)}
+
+    def _process_epub(
+        self,
+        files: list[Path],
+        content_root: Path,
+        product_dir: Path,
+        translator: Translator,
+        report: ProgressCallback,
+    ) -> dict:
+        epub_files = [path for path in files if path.suffix.lower() in EPUB_EXTENSIONS]
+        if not epub_files:
+            raise PipelineError("未找到 EPUB 文件。")
+        translation = self.config.section("translation")
+        entries: list[dict] = []
+        for index, source in enumerate(epub_files, start=1):
+            relative = source.relative_to(content_root)
+            destination = product_dir / relative.parent / f"{source.stem}_zh.epub"
+
+            def item_progress(value: int, message: str) -> None:
+                overall = 18 + int(((index - 1) + value / 100) / len(epub_files) * 72)
+                report(overall, message)
+
+            try:
+                metadata = translate_epub(
+                    source,
+                    destination,
+                    translator,
+                    max_chars=int(translation.get("max_input_chars", 420)),
+                    batch_size=int(translation.get("batch_size", 8)),
+                    context_segments=int(translation.get("context_segments", 4)),
+                    context_chars=int(translation.get("context_chars", 1800)),
+                    progress=item_progress,
+                )
+            except EpubError as error:
+                raise PipelineError(str(error)) from error
             entries.append({"file": relative.as_posix(), **metadata})
         return {"documents": entries, "count": len(entries)}
 

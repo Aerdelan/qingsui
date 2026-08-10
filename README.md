@@ -14,7 +14,7 @@ A **local-first** web app that automatically translates **Japanese novels and ma
 
 ## Why Aoba?
 
-- 🖼️ **Manga + 📖 novels in one tool** — upload a `.cbz/.zip` of manga pages or a `.txt` light novel, get a translated ZIP back.
+- 🖼️ **Manga + 📖 novels + 📚 EPUB in one tool** — upload a `.cbz/.zip` of manga pages, a `.txt` light novel or an `.epub` book, get a translated ZIP back. EPUB translations keep the original illustrations, styles and reading order.
 - 🤖 **Any local LLM via Ollama** — defaults to Qwen 3.5 with an ACGN-tuned colloquial prompt and rolling story context; swap in Sakura/Murasaki or your own fine-tune in one config line.
 - 👁️ **Vision-model OCR** — EasyOCR CRAFT detects text boxes, a local vision model (`glm-ocr`) reads them, including decorative and outlined fonts that classic OCR garbles.
 - 🧹 **Non-destructive erasure** — glyph-pixel masking + OpenCV Telea inpainting removes text without painting over speech-bubble backgrounds.
@@ -111,6 +111,7 @@ Generated at `.local/config.json` (see `config.example.json`). Highlights:
 | Type | Formats |
 | --- | --- |
 | Novels | `.txt`, `.md` (UTF-8 / UTF-16 / CP932 / Shift-JIS auto-detected) |
+| EPUB light novels | `.epub` (paragraph-level translation; images & CSS preserved, output is a `_zh.epub`) |
 | Manga pages | `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tif`, `.tiff` |
 | Archives | `.zip`, `.cbz`, `.7z`, `.rar` |
 

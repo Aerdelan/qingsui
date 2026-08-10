@@ -6,7 +6,8 @@
 
 ## 当前能力
 
-- 自动识别 `TXT / Markdown` 小说、漫画图片以及图片压缩包。
+- 自动识别 `TXT / Markdown` 小说、`EPUB` 轻小说、漫画图片以及图片压缩包。
+- EPUB 按 OPF 阅读顺序逐段翻译正文，保留插图、样式与章节结构，输出 `_zh.epub`。
 - 安全解压 `ZIP / CBZ / 7Z / RAR`，防止路径穿越并限制解压体积。
 - 小说按原始段落、换行和日文句号智能分段，输出 UTF-8 BOM 文本。
 - 漫画使用 EasyOCR CRAFT 检测文字区域，再由本机 Ollama 视觉模型（glm-ocr）识别，按相邻关系合并文本行。
@@ -157,6 +158,7 @@ python -m aoba_translator translate .\samples\novel.txt
 | 类型 | 格式 | 说明 |
 | --- | --- | --- |
 | 小说 | `.txt`, `.md` | 自动检测 UTF-8、UTF-16、CP932、Shift-JIS |
+| EPUB 轻小说 | `.epub` | 按阅读顺序逐段翻译，保留插图与排版，输出 `_zh.epub` |
 | 漫画图片 | `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tif`, `.tiff` | 可直接上传单图 |
 | 漫画压缩包 | `.zip`, `.cbz`, `.7z`, `.rar` | ZIP/CBZ 无外部工具；RAR 可能需要 7-Zip 或 unrar |
 
