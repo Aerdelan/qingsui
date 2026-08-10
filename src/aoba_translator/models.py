@@ -4,6 +4,7 @@ import importlib.util
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -30,6 +31,24 @@ class ModelSetupError(RuntimeError):
 
 
 ProgressCallback = Callable[[int, str], None]
+
+
+def _pip_requirement(import_name: str) -> str:
+    """把导入名映射为带版本约束的 pip 包名，约束与 pyproject.toml 的 ml 分组保持一致。"""
+    pinned = {
+        "easyocr": "easyocr>=1.7.2,<2",
+        "cv2": "opencv-python-headless>=4.10,<5",
+        "numpy": "numpy",
+        "PIL": "Pillow>=10.4,<13",
+        "torch": "torch>=2.4,<3",
+        "torchvision": "torchvision>=0.19,<1",
+        "transformers": "transformers>=4.46,<6",
+        "sentencepiece": "sentencepiece>=0.2,<1",
+        "huggingface_hub": "huggingface-hub>=0.27,<2",
+        "py7zr": "py7zr>=0.22,<2",
+        "rarfile": "rarfile>=4.2,<5",
+    }
+    return pinned.get(import_name, import_name)
 
 
 class ModelManager:
@@ -128,9 +147,16 @@ class ModelManager:
         if provider == "transformers" and importlib.util.find_spec("transformers") is None:
             missing.append("transformers")
         if missing:
-            message = missing_dependencies_message(missing)
-            self._save_error(message)
-            raise ModelSetupError(message)
+            try:
+                self._install_python_packages(missing, report)
+            except ModelSetupError as exc:
+                self._save_error(str(exc))
+                raise
+            still_missing = [name for name in missing if importlib.util.find_spec(name) is None]
+            if still_missing:
+                message = missing_dependencies_message(still_missing)
+                self._save_error(message)
+                raise ModelSetupError(message)
 
         try:
             report(5, "检查本地模型目录")
@@ -163,6 +189,37 @@ class ModelManager:
             if isinstance(exc, ModelSetupError):
                 raise
             raise ModelSetupError(f"模型初始化失败：{exc}") from exc
+
+    def _install_python_packages(self, missing: list[str], report: ProgressCallback) -> None:
+        """用当前环境的 pip 自动补装缺失依赖，无需用户手动执行 start.ps1。"""
+        requirements = [_pip_requirement(name) for name in missing]
+        command = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--no-input",
+            *requirements,
+        ]
+        report(3, f"正在自动安装缺失依赖：{', '.join(sorted(set(missing)))}（可能耗时数分钟）")
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=7200,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ModelSetupError(f"自动安装依赖失败：{exc}") from exc
+        importlib.invalidate_caches()
+        if completed.returncode != 0:
+            tail = "\n".join((completed.stderr or completed.stdout or "").strip().splitlines()[-8:])
+            raise ModelSetupError(f"pip 自动安装依赖失败（退出码 {completed.returncode}）：\n{tail}")
+        report(6, "依赖安装完成")
 
     def _prepare_transformers(self, report: ProgressCallback) -> None:
         if self._translation_ready():

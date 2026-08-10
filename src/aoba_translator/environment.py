@@ -11,8 +11,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from .messages import start_command_hint
-
 
 @dataclass(slots=True)
 class EnvironmentReport:
@@ -117,7 +115,7 @@ def inspect_environment() -> EnvironmentReport:
     if not supported:
         recommendations.append("推荐使用 Python 3.11；当前版本可能无法安装 OCR 或 PyTorch。")
     if not all(packages[name] for name in ("easyocr", "transformers", "torch", "cv2", "PIL")):
-        recommendations.append(f"机器学习依赖未完整安装。{start_command_hint()}，或在设置页执行初始化。")
+        recommendations.append("机器学习依赖未完整安装：初始化模型时会自动用 pip 补装，无需手动执行脚本。")
     if memory is not None and memory < 8:
         recommendations.append("内存少于 8 GB，建议减小翻译批次并避免一次处理大型漫画。")
     if not cuda:

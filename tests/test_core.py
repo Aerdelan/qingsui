@@ -21,7 +21,7 @@ from aoba_translator.epub import EpubError, translate_epub
 from aoba_translator.config import load_config
 from aoba_translator.manga import merge_regions
 from aoba_translator.messages import START_COMMAND, missing_dependencies_message
-from aoba_translator.models import ModelManager
+from aoba_translator.models import ModelManager, _pip_requirement
 from aoba_translator.novel import build_translation_units, decode_text, restore_document, translate_novel
 from aoba_translator.pipeline import TranslationPipeline
 from aoba_translator.server import build_access_urls, sanitize_filename
@@ -284,6 +284,11 @@ class MessageTests(unittest.TestCase):
             message,
             f"缺少运行依赖：cv2, easyocr, torch, transformers。请在项目目录执行：{START_COMMAND}",
         )
+
+    def test_pip_requirement_maps_import_names(self) -> None:
+        self.assertEqual(_pip_requirement("cv2"), "opencv-python-headless>=4.10,<5")
+        self.assertEqual(_pip_requirement("PIL"), "Pillow>=10.4,<13")
+        self.assertEqual(_pip_requirement("numpy"), "numpy")
 
 
 class ServerTests(unittest.TestCase):
